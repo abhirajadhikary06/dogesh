@@ -21,6 +21,7 @@ class ChatMessage:
     role: str          # "user" | "assistant"
     content: str
     timestamp: str = ""
+    avatar: str = ""
 
 
 @dataclass
@@ -41,6 +42,7 @@ class AppState:
     # ── Keys ──────────────────────────────────────────────────────────────────
     api_keys: dict = field(default_factory=dict)
     active_provider: Optional[str] = None
+    user_avatar: str = ""
 
     # ── Callbacks (set by UI) ─────────────────────────────────────────────────
     on_status_change: Optional[Callable] = None
@@ -53,15 +55,16 @@ class AppState:
         if self.on_status_change:
             self.on_status_change(s)
 
-    def add_message(self, role: str, content: str):
+    def add_message(self, role: str, content: str, avatar: str = "", notify: bool = True):
         import datetime
         msg = ChatMessage(
             role=role,
             content=content,
             timestamp=datetime.datetime.now().strftime("%H:%M"),
+            avatar=avatar,
         )
         self.chat_history.append(msg)
-        if self.on_new_message:
+        if notify and self.on_new_message:
             self.on_new_message(msg)
 
     def set_transcript(self, text: str):
@@ -75,6 +78,7 @@ class AppState:
     def login(self, user: dict):
         self.current_user = user
         self.is_logged_in = True
+        self.user_avatar = user.get("avatar", "")
 
     def logout(self):
         self.current_user = None
@@ -83,3 +87,4 @@ class AppState:
         self.api_keys = {}
         self.active_provider = None
         self.wake_word_active = False
+        self.user_avatar = ""

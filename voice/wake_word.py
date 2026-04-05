@@ -5,7 +5,7 @@ Runs as a background daemon thread; fires a callback when "Hey Dogesh" is heard.
 
 import threading
 from typing import Callable, Optional
-from config import WAKE_WORD, WAKE_DETECT_INTERVAL
+from config import WAKE_WORD, WAKE_ALIASES, WAKE_DETECT_INTERVAL, WAKE_PHRASE_LIMIT
 from voice.stt import STTEngine
 
 
@@ -57,11 +57,12 @@ class WakeWordDetector:
             try:
                 detected = self._stt.listen_for_wake(
                     wake_phrase=WAKE_WORD,
+                    wake_aliases=WAKE_ALIASES,
                     timeout=WAKE_DETECT_INTERVAL,
-                    phrase_limit=5.0,
+                    phrase_limit=WAKE_PHRASE_LIMIT,
                 )
                 if detected and not self._paused:
-                    self._on_wake()
+                    self._on_wake(detected)
             except Exception as e:
                 if self._on_error:
                     self._on_error(str(e))
