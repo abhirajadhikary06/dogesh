@@ -7,56 +7,52 @@ from ..llm_service import LLMService
 from ..security import get_current_user
 from dotenv import load_dotenv
 import os
-import io
 import json
-import wave
-import audioop
-from vosk import Model, KaldiRecognizer
+from urllib import request, error
 
 load_dotenv()
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 
+def _transcribe_with_model(audio_bytes: bytes, content_type: str, user_api_keys: dict) -> str:
+    model_id = os.getenv("HF_WHISPER_MODEL", "openai/whisper-large-v3-turbo")
+    api_token = (
+        (user_api_keys or {}).get("HUGGINGFACE_API_TOKEN")
+        or (user_api_keys or {}).get("HUGGINGFACE_API_KEY")
+        or (user_api_keys or {}).get("HF_API_TOKEN")
+        or os.getenv("HUGGINGFACE_API_TOKEN")
+        or os.getenv("HUGGINGFACE_API_KEY")
+        or os.getenv("HF_API_TOKEN")
+    )
 
-_vosk_model = None
-
-
-def _get_vosk_model() -> Model:
-    global _vosk_model
-    if _vosk_model is not None:
-        return _vosk_model
-
-    model_path = os.getenv("VOSK_MODEL_PATH", "models/vosk-model-small-en-us-0.15")
-    if not os.path.isdir(model_path):
+    if not api_token:
         raise HTTPException(
             400,
-            f"Missing VOSK model directory at {model_path}. Set VOSK_MODEL_PATH to a valid Vosk model folder.",
+            "Missing Hugging Face token. Set HUGGINGFACE_API_TOKEN, HUGGINGFACE_API_KEY, or HF_API_TOKEN.",
         )
 
-    _vosk_model = Model(model_path)
-    return _vosk_model
+    endpoint = f"https://api-inference.huggingface.co/models/{model_id}"
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Content-Type": content_type or "application/octet-stream",
+    }
 
+    req = request.Request(endpoint, data=audio_bytes, headers=headers, method="POST")
 
-def _transcribe_with_model(audio_bytes: bytes, filename: str, user_api_keys: dict) -> str:
     try:
-        with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
-            sample_rate = wav_file.getframerate()
-            channels = wav_file.getnchannels()
-            sample_width = wav_file.getsampwidth()
-            pcm_data = wav_file.readframes(wav_file.getnframes())
+        with request.urlopen(req, timeout=90) as resp:
+            payload = resp.read().decode("utf-8")
 
-        if channels > 1:
-            pcm_data = audioop.tomono(pcm_data, sample_width, 1, 1)
+        data = json.loads(payload)
+        if isinstance(data, dict) and data.get("error"):
+            raise HTTPException(502, f"Hugging Face transcription error: {data['error']}")
 
-        if sample_rate != 16000:
-            pcm_data, _ = audioop.ratecv(pcm_data, sample_width, 1, sample_rate, 16000, None)
-            sample_rate = 16000
-
-        model = _get_vosk_model()
-        recognizer = KaldiRecognizer(model, sample_rate)
-        recognizer.SetWords(False)
-        recognizer.AcceptWaveform(pcm_data)
-        result = json.loads(recognizer.FinalResult() or "{}")
-        return (result.get("text") or "").strip()
+        text = data.get("text") if isinstance(data, dict) else ""
+        return (text or "").strip()
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(502, f"Hugging Face HTTP error {exc.code}: {detail}")
+    except error.URLError as exc:
+        raise HTTPException(502, f"Hugging Face connection failed: {str(exc.reason)}")
     except HTTPException:
         raise
     except Exception as exc:
@@ -126,7 +122,7 @@ async def transcribe_audio(
         raise HTTPException(400, "Empty audio payload")
 
     try:
-        text = _transcribe_with_model(audio_bytes, file.filename or "audio.webm", user.api_keys or {})
+        text = _transcribe_with_model(audio_bytes, file.content_type or "application/octet-stream", user.api_keys or {})
     except HTTPException:
         raise
     except Exception as exc:

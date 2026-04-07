@@ -8,4 +8,3 @@ python-multipart
 python-dotenv
 llmsays
 psycopg2-binary
-vosk

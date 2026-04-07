@@ -6,7 +6,7 @@ It supports:
 - User signup/login with JWT auth
 - Post-login voice calibration
 - LLM-backed assistant chat
-- Voice transcription using Vosk (server-side)
+- Voice transcription using Hugging Face Whisper API
 - Per-user provider API key storage
 
 ## Project Structure
@@ -35,7 +35,7 @@ dogesh/
 
 - Python 3.10+
 - A PostgreSQL database URL (or any SQLAlchemy-compatible URL supported by SQLModel)
-- Vosk speech model files (for `/assistant/transcribe`)
+- A Hugging Face token for inference API (for `/assistant/transcribe`)
 
 ## Setup
 
@@ -83,12 +83,14 @@ OPENROUTER_API_KEY=
 NVIDIA_API_KEY=
 FIREWORKSAI_API_KEY=
 BASETEN_API_KEY=
+HUGGINGFACE_API_TOKEN=
+HF_WHISPER_MODEL=openai/whisper-large-v3-turbo
 
 # Optional typo fallback supported by code
 NIVIDIA_API_KEY=
 
-# Vosk model folder path (optional)
-VOSK_MODEL_PATH=models/vosk-model-small-en-us-0.15
+# Optional alias also accepted by backend
+HF_API_TOKEN=
 ```
 
 Important:
@@ -96,19 +98,18 @@ Important:
 - Do not commit real API keys or secrets.
 - If credentials were committed before, rotate them immediately.
 
-## Vosk Model Setup
+## Whisper API Setup
 
-The transcribe endpoint requires a local Vosk model directory.
-By default the app expects:
+The transcribe endpoint calls Hugging Face Inference API using:
 
-- `models/vosk-model-small-en-us-0.15`
+- `openai/whisper-large-v3-turbo`
 
-Either:
+Set in `.env`:
 
-1. Download and extract a Vosk model into that path, or
-2. Set `VOSK_MODEL_PATH` in `.env` to your model folder.
+- `HUGGINGFACE_API_TOKEN` (or `HF_API_TOKEN`)
+- `HF_WHISPER_MODEL` (optional override, defaults to `openai/whisper-large-v3-turbo`)
 
-If the directory is missing, `/assistant/transcribe` returns HTTP 400.
+If no token is configured, `/assistant/transcribe` returns HTTP 400.
 
 ## Run Backend
 
@@ -264,8 +265,8 @@ curl -X POST "http://127.0.0.1:8000/assistant/query" \
 
 ## Troubleshooting
 
-- `Missing VOSK model directory...`
-  - Set `VOSK_MODEL_PATH` correctly or download model to default path.
+- `Missing Hugging Face token...`
+  - Set `HUGGINGFACE_API_TOKEN` or `HF_API_TOKEN` in `.env`.
 - `Could not validate credentials`
   - Ensure token is present and not expired.
 - `Request failed (401)` from frontend

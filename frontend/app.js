@@ -53,6 +53,7 @@ const el = {
   nvidiaKeyInput: document.getElementById("nvidiaKeyInput"),
   fireworksKeyInput: document.getElementById("fireworksKeyInput"),
   basetenKeyInput: document.getElementById("basetenKeyInput"),
+  huggingfaceKeyInput: document.getElementById("huggingfaceKeyInput"),
   saveKeysBtn: document.getElementById("saveKeysBtn"),
   voiceState: document.getElementById("voiceState"),
   logoutBtn: document.getElementById("logoutBtn"),
@@ -634,19 +635,22 @@ async function runVoiceEnrollment(autoTriggered = false) {
 async function onApiKeysSubmit(event) {
   event.preventDefault();
 
+  const huggingfaceKey = el.huggingfaceKeyInput.value.trim();
+  if (!huggingfaceKey) {
+    addMessage("error", "Hugging Face API Key is mandatory for transcription.");
+    return;
+  }
+
   const keys = {
     GROQ_API_KEY: el.groqKeyInput.value.trim(),
     OPENROUTER_API_KEY: el.openrouterKeyInput.value.trim(),
     NVIDIA_API_KEY: el.nvidiaKeyInput.value.trim(),
     FIREWORKSAI_API_KEY: el.fireworksKeyInput.value.trim(),
     BASETEN_API_KEY: el.basetenKeyInput.value.trim(),
+    HUGGINGFACE_API_KEY: huggingfaceKey,
   };
 
   const filtered = Object.fromEntries(Object.entries(keys).filter(([, v]) => Boolean(v)));
-  if (Object.keys(filtered).length === 0) {
-    addMessage("error", "Provide at least one API key before proceeding.");
-    return;
-  }
 
   el.saveKeysBtn.disabled = true;
   try {
