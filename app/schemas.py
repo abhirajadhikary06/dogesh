@@ -31,3 +31,7 @@ class AssistantResponse(BaseModel):
     intent: str
     action: Optional[str] = None
     action_data: Optional[Dict] = None
+
+
+class TTSRequest(BaseModel):
+    text: str

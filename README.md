@@ -85,6 +85,7 @@ FIREWORKSAI_API_KEY=
 BASETEN_API_KEY=
 HUGGINGFACE_API_TOKEN=
 HF_WHISPER_MODEL=openai/whisper-large-v3-turbo
+HF_TTS_MODEL=hexgrad/Kokoro-82M
 
 # Optional typo fallback supported by code
 NIVIDIA_API_KEY=
@@ -110,6 +111,20 @@ Set in `.env`:
 - `HF_WHISPER_MODEL` (optional override, defaults to `openai/whisper-large-v3-turbo`)
 
 If no token is configured, `/assistant/transcribe` returns HTTP 400.
+
+## TTS API Setup
+
+The TTS endpoint calls Hugging Face Inference API using:
+
+- `hexgrad/Kokoro-82M`
+
+Set in `.env` (optional override):
+
+- `HF_TTS_MODEL` (defaults to `hexgrad/Kokoro-82M`)
+
+Authentication token is the same Hugging Face token used by transcription:
+
+- `HUGGINGFACE_API_TOKEN` (or `HUGGINGFACE_API_KEY` / `HF_API_TOKEN`)
 
 ## Run Backend
 
@@ -227,6 +242,18 @@ Base prefix: `/assistant`
   "text": "transcribed speech"
 }
 ```
+
+5. `POST /assistant/tts`
+- Body:
+
+```json
+{
+  "text": "Hello from Dogesh"
+}
+```
+
+- Response:
+  - Binary audio stream (`audio/*`)
 
 ## Frontend Behavior
 
