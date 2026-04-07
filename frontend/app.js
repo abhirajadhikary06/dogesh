@@ -29,6 +29,7 @@ const state = {
     wakeCooldownUntil: 0,
     calibrationPhrase: "",
     awaitTimer: null,
+    playbackAudio: null,
   },
 };
 
@@ -101,19 +102,20 @@ function updateUiGates() {
   const isAuthed = Boolean(state.token);
   el.setupPanel.classList.toggle("hidden", !isAuthed);
 
-  const chatEnabled = isAuthed && state.setup.complete;
+  const chatEnabled = isAuthed;
+  const voiceEnabled = isAuthed && state.setup.voiceReady;
   el.queryInput.disabled = !chatEnabled;
   el.sendBtn.disabled = !chatEnabled;
-  el.micBtn.disabled = !chatEnabled;
+  el.micBtn.disabled = !voiceEnabled;
   if (!isAuthed) {
     el.setupState.textContent = "Login required";
-    el.voiceSetupState.textContent = "Not started";
+    el.voiceSetupState.textContent = "Required for voice";
     el.apiKeysState.textContent = "Required";
     setVoiceState("Voice idle");
-  } else if (state.setup.complete) {
-    el.setupState.textContent = "Setup complete";
+  } else if (state.setup.voiceReady) {
+    el.setupState.textContent = "Voice ready";
   } else {
-    el.setupState.textContent = "Setup incomplete";
+    el.setupState.textContent = "Text chat ready; voice setup pending";
   }
 }
 
@@ -456,32 +458,117 @@ function ensureWakeWordListening() {
 }
 
 function speakResponse(text) {
-  if (!("speechSynthesis" in window) || !text) {
+  const normalizedText = (text || "").trim();
+  if (!normalizedText) {
     return;
   }
 
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1;
-  utterance.pitch = 1;
-  utterance.onstart = () => {
+  const beginSpeaking = () => {
     state.voice.isSpeaking = true;
     stopWakeWordListening();
     setVoiceState("Speaking response");
   };
-  utterance.onend = () => {
+
+  const endSpeaking = () => {
     state.voice.isSpeaking = false;
-    ensureWakeWordListening();
-  };
-  utterance.onerror = () => {
-    state.voice.isSpeaking = false;
-    ensureWakeWordListening();
+    if (state.setup.complete) {
+      ensureWakeWordListening();
+      setVoiceState("Listening for Hey Dogesh");
+    } else {
+      setVoiceState("Voice idle");
+    }
   };
 
-  window.speechSynthesis.speak(utterance);
+  const stopExistingPlayback = () => {
+    if (state.voice.playbackAudio) {
+      state.voice.playbackAudio.pause();
+      state.voice.playbackAudio = null;
+    }
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  };
+
+  const fallbackBrowserTTS = () => {
+    return new Promise((resolve, reject) => {
+      if (!("speechSynthesis" in window)) {
+        reject(new Error("No browser speech synthesis support."));
+        return;
+      }
+      const utterance = new SpeechSynthesisUtterance(normalizedText);
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      utterance.onend = () => resolve();
+      utterance.onerror = () => reject(new Error("Browser TTS failed."));
+      window.speechSynthesis.speak(utterance);
+    });
+  };
+
+  const playRemoteTTS = async () => {
+    const response = await fetch(`${backendBase()}/assistant/tts`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${state.token}`,
+      },
+      body: JSON.stringify({ text: normalizedText }),
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.detail || `TTS request failed (${response.status})`);
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const audio = new Audio(objectUrl);
+    state.voice.playbackAudio = audio;
+
+    await new Promise((resolve, reject) => {
+      audio.onended = () => {
+        URL.revokeObjectURL(objectUrl);
+        state.voice.playbackAudio = null;
+        resolve();
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        state.voice.playbackAudio = null;
+        reject(new Error("Failed to play TTS audio."));
+      };
+
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.then === "function") {
+        playPromise.catch((error) => {
+          URL.revokeObjectURL(objectUrl);
+          state.voice.playbackAudio = null;
+          reject(error);
+        });
+      }
+    });
+  };
+
+  (async () => {
+    beginSpeaking();
+    stopExistingPlayback();
+    try {
+      await playRemoteTTS();
+    } catch (_) {
+      try {
+        await fallbackBrowserTTS();
+      } catch (fallbackError) {
+        addMessage("error", fallbackError.message || "TTS playback failed.");
+      }
+    } finally {
+      endSpeaking();
+    }
+  })();
 }
 
 function startManualMicCapture() {
+  if (!state.setup.voiceReady) {
+    addMessage("assistant", "Run Voice Setup first to enable mic input.");
+    return;
+  }
   if (!state.voice.audioCaptureSupported) {
     addMessage("error", "Manual mic capture is not supported in this browser.");
     return;
@@ -552,21 +639,21 @@ async function sendAssistantQuery(text, fromVoice = false) {
   } catch (error) {
     addMessage("error", error.message);
   } finally {
-    if (state.setup.complete) {
+    if (state.token) {
       el.sendBtn.disabled = false;
     }
   }
 }
 
 async function completeSetupIfReady() {
-  if (!state.setup.voiceReady || !state.setup.keysReady || state.setup.complete) {
+  if (!state.setup.voiceReady || state.setup.complete) {
     updateUiGates();
     return;
   }
 
   state.setup.complete = true;
   state.voice.shouldListen = true;
-  addMessage("assistant", "Setup complete. Say 'Hey Dogesh' and continue asking questions naturally.");
+  addMessage("assistant", "Voice setup complete. Say 'Hey Dogesh' and continue asking questions naturally.");
   updateUiGates();
   ensureWakeWordListening();
 }
@@ -696,7 +783,7 @@ async function onAuthSubmit(event) {
 
     setAuth(data.access_token || "");
     resetSetupState();
-    el.voiceSetupState.textContent = "Pending";
+    el.voiceSetupState.textContent = "Required for voice";
     el.apiKeysState.textContent = "Required";
     el.startVoiceSetupBtn.disabled = false;
     state.voice.shouldListen = false;
@@ -704,8 +791,7 @@ async function onAuthSubmit(event) {
     updateUiGates();
 
     addMessage("assistant", `${state.mode === "login" ? "Logged in" : "Signed up"} as ${email}.`);
-    addMessage("assistant", "Starting post-login setup now.");
-    runVoiceEnrollment(true);
+    addMessage("assistant", "Typed chat is ready now. Run Voice Setup when you want mic input and wake-word mode.");
     el.passwordInput.value = "";
   } catch (error) {
     addMessage("error", error.message);
@@ -761,6 +847,10 @@ function boot() {
     stopWakeWordListening();
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
+    }
+    if (state.voice.playbackAudio) {
+      state.voice.playbackAudio.pause();
+      state.voice.playbackAudio = null;
     }
     setAuth("");
     resetSetupState();
